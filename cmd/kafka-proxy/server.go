@@ -383,7 +383,7 @@ func Run(_ *cobra.Command, _ []string) {
 
 	var g run.Group
 	{
-		// All active connections are stored in this variable.
+		// All active outbound upstream connections are stored in this variable.
 		connset := proxy.NewConnSet()
 		prometheus.MustRegister(proxy.NewCollector(connset))
 		listeners, err := proxy.NewListeners(c)
@@ -394,7 +394,8 @@ func Run(_ *cobra.Command, _ []string) {
 		if err != nil {
 			logrus.Fatal(err)
 		}
-		proxyClient, err := proxy.NewClient(connset, c, listeners.GetNetAddressMapping, localPasswordAuthenticator, localTokenAuthenticator, saslTokenProvider, gatewayTokenProvider, gatewayTokenInfo)
+
+		proxyClient, err := proxy.NewClient(connset, c, listeners.GetAdvertisedListener, localPasswordAuthenticator, localTokenAuthenticator, saslTokenProvider, gatewayTokenProvider, gatewayTokenInfo)
 		if err != nil {
 			logrus.Fatal(err)
 		}
@@ -483,7 +484,7 @@ func SetLogger() {
 		}
 		logrus.SetFormatter(formatter)
 	} else {
-		logrus.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
+		logrus.SetFormatter(&logrus.TextFormatter{FullTimestamp: false})
 	}
 	level, err := logrus.ParseLevel(c.Log.Level)
 	if err != nil {
