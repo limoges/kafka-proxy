@@ -18,6 +18,23 @@ type Conn struct {
 	// BrokerAddress is the upstream broker resolved from client connection parameters.
 	BrokerAddress   string
 	LocalConnection net.Conn
+
+	// TLSServerName is the server name requested by the client during the tls handshake.
+	TLSServerName string
+
+	// PPv2Authority is the proxy protocol v2 header which represents the client requested server
+	// passed to the downstream proxy which terminated tls.
+	PPv2Authority string
+}
+
+func (c Conn) DownstreamServerName() string {
+	// When a connection uses both Proxy Protocol v2 and TLS, the PPv2 header precedes
+	// the TLS handshake. This allows multiple layers of proxy to carry the original
+	// client tls parameters, while using tls between the proxies.
+	if c.PPv2Authority != "" {
+		return c.PPv2Authority
+	}
+	return c.TLSServerName
 }
 
 // Client is a type to handle connecting to a Server. All fields are required

@@ -29,6 +29,7 @@ type Listeners struct {
 	tcpConnOptions TCPConnOptions
 
 	listenFunc ListenFunc
+	tlsConfig  *tls.Config
 
 	deterministicListeners   bool
 	disableDynamicListeners  bool
@@ -57,10 +58,6 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 
 	listenFunc := func(listenAddress string) (net.Listener, error) {
 
-		if tlsConfig != nil {
-			return tls.Listen("tcp", listenAddress, tlsConfig)
-		}
-
 		ln, err := net.Listen("tcp", listenAddress)
 		if err != nil {
 			return ln, err
@@ -82,6 +79,7 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 		dynamicAdvertisedListener: cfg.Proxy.DynamicAdvertisedListener,
 		connSrc:                   make(chan Conn, 1),
 		brokerToListenerConfig:    brokerToListenerConfig,
+		tlsConfig:                 tlsConfig,
 		tcpConnOptions:            tcpConnOptions,
 		listenFunc:                listenFunc,
 		deterministicListeners:    cfg.Proxy.DeterministicListeners,
@@ -228,7 +226,7 @@ func (p *Listeners) ListenDynamicInstance(brokerAddress string, brokerId int32) 
 
 	fmt.Println("proxy/proxy.go:", "NewListenerConfig", "brokerAddress", brokerAddress, "listenerAddress", listenerAddress, "brokerId", brokerId)
 	cfg := NewListenerConfig(brokerAddress, listenerAddress, "", brokerId)
-	l, err := listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc, p)
+	l, err := p.listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc, p)
 	if err != nil {
 		return "", 0, err
 	}
@@ -291,16 +289,19 @@ func (p *Listeners) templateDynamicAdvertisedAddress(brokerID int32) (string, er
 
 func (p *Listeners) GetBrokerAddressByAdvertisedHost(host string) (brokerAddress string, brokerId int32, err error) {
 
-	fmt.Println("Search for Broker Address", len(p.brokerToListenerConfig))
-
 	// TODO: Use a better algorithm than a forloop
 	// Maybe use a bi-directional map? I believe downstream hostport always has only one upstream hostport.
 	for brokerAddr, c := range p.brokerToListenerConfig {
 		if c == nil {
 			continue
 		}
-		if c.GetAdvertisedAddress() == host {
-			fmt.Println("Match", brokerAddr, c.GetBrokerID())
+		// fmt.Println("Comparing", "host", host, "advertisedAddress", c.GetAdvertisedAddress())
+		advertisedHost, _, err := net.SplitHostPort(c.GetAdvertisedAddress())
+		if err != nil {
+			fmt.Println("failed to split address", err)
+		}
+		if advertisedHost == host {
+			// fmt.Println("Match!", "brokerAddr", brokerAddr, "brokerID", c.GetBrokerID(), "advertisedAddress", c.GetAdvertisedAddress())
 			return brokerAddr, c.GetBrokerID(), nil
 		}
 	}
@@ -316,7 +317,7 @@ func (p *Listeners) ListenInstances(cfgs []config.ListenerConfig) (<-chan Conn, 
 	// allows multiple local addresses to point to the remote
 	for _, v := range cfgs {
 		cfg := FromListenerConfig(v)
-		_, err := listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc, p)
+		_, err := p.listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc, p)
 		if err != nil {
 			return nil, err
 		}
@@ -336,7 +337,7 @@ type HostBasedRouting interface {
 	GetBrokerAddressByAdvertisedHost(host string) (brokerAddress string, brokerId int32, err error)
 }
 
-func listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TCPConnOptions, listenFunc ListenFunc, brokers HostBasedRouting) (net.Listener, error) {
+func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TCPConnOptions, listenFunc ListenFunc, brokers HostBasedRouting) (net.Listener, error) {
 
 	l, err := listenFunc(cfg.GetListenerAddress())
 	if err != nil {
@@ -349,6 +350,21 @@ func listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TCPConnOptions, l
 				logrus.Infof("Error in accept for %q on %v: %v", cfg.ToListenerConfig(), l.Addr(), err)
 				l.Close()
 				return
+			}
+
+			var serverName string
+			if p.tlsConfig != nil {
+				tlsConfig := &tls.Config{}
+				tlsConfig.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+					serverName = hello.ServerName
+					return p.tlsConfig, nil
+				}
+				tlsConn := tls.Server(c, tlsConfig)
+				err := tlsConn.Handshake()
+				if err != nil {
+					logrus.Errorf("ERROR: tls handshake failed: %s", err)
+					c.Close()
+				}
 			}
 
 			// When supporting proxy protocol v2, the listener might be shared.
@@ -381,16 +397,29 @@ func listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TCPConnOptions, l
 				}
 			}
 
+			var advertisedHost string
+			if serverName != "" {
+				advertisedHost = serverName
+			}
+			if authority != "" {
+				advertisedHost = authority
+			}
+
 			brokerAddress := cfg.GetBrokerAddress()
 			brokerId := cfg.GetBrokerID()
-			if address, id, err := brokers.GetBrokerAddressByAdvertisedHost(authority); err == nil {
-				brokerAddress = address
-				brokerId = id
+
+			if advertisedHost != "" {
+				if address, id, err := brokers.GetBrokerAddressByAdvertisedHost(advertisedHost); err == nil {
+					brokerAddress = address
+					brokerId = id
+				} else {
+					logrus.Infof("%s: Failed to match host/authority %q with any advertised address", l.Addr(), advertisedHost)
+				}
 			}
 			if brokerId != UnknownBrokerID {
-				logrus.Infof("%s: New connection for %s brokerId %d with authority %s", l.Addr(), brokerAddress, brokerId, authority)
+				logrus.Infof("%s: New connection for %s brokerId %d with host/authority %s", l.Addr(), brokerAddress, brokerId, advertisedHost)
 			} else {
-				logrus.Infof("%s: New connection with authority %s", l.Addr(), authority)
+				logrus.Infof("%s: New connection with host/authority %s", l.Addr(), advertisedHost)
 			}
 			dst <- Conn{BrokerAddress: brokerAddress, LocalConnection: c}
 		}
