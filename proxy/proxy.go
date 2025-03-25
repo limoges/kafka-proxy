@@ -337,6 +337,49 @@ type HostBasedRouting interface {
 	GetBrokerAddressByAdvertisedHost(host string) (brokerAddress string, brokerId int32, err error)
 }
 
+func PrintTLV(t proxyproto.PP2Type) string {
+	switch t {
+	case proxyproto.PP2_TYPE_ALPN:
+		return "PP2_TYPE_ALPN"
+	case proxyproto.PP2_TYPE_AUTHORITY:
+		return "PP2_TYPE_AUTHORITY"
+	case proxyproto.PP2_TYPE_CRC32C:
+		return "PP2_TYPE_CRC32C"
+	case proxyproto.PP2_TYPE_NOOP:
+		return "PP2_TYPE_NOOP"
+	case proxyproto.PP2_TYPE_UNIQUE_ID:
+		return "PP2_TYPE_UNIQUE_ID"
+	case proxyproto.PP2_TYPE_SSL:
+		return "PP2_TYPE_SSL"
+	case proxyproto.PP2_SUBTYPE_SSL_VERSION:
+		return "PP2_SUBTYPE_SSL_VERSION"
+	case proxyproto.PP2_SUBTYPE_SSL_CN:
+		return "PP2_SUBTYPE_SSL_CN"
+	case proxyproto.PP2_SUBTYPE_SSL_CIPHER:
+		return "PP2_SUBTYPE_SSL_CIPHER"
+	case proxyproto.PP2_SUBTYPE_SSL_SIG_ALG:
+		return "PP2_SUBTYPE_SSL_SIG_ALG"
+	case proxyproto.PP2_SUBTYPE_SSL_KEY_ALG:
+		return "PP2_SUBTYPE_SSL_KEY_ALG"
+	case proxyproto.PP2_TYPE_NETNS:
+		return "PP2_TYPE_NETNS"
+	case proxyproto.PP2_TYPE_MIN_CUSTOM:
+		return "PP2_TYPE_MIN_CUSTOM"
+	case proxyproto.PP2_TYPE_MAX_CUSTOM:
+		return "PP2_TYPE_MAX_CUSTOM"
+	case proxyproto.PP2_TYPE_MIN_EXPERIMENT:
+		return "PP2_TYPE_MIN_EXPERIMENT"
+	case proxyproto.PP2_TYPE_MAX_EXPERIMENT:
+		return "PP2_TYPE_MAX_EXPERIMENT"
+	case proxyproto.PP2_TYPE_MIN_FUTURE:
+		return "PP2_TYPE_MIN_FUTURE"
+	case proxyproto.PP2_TYPE_MAX_FUTURE:
+		return "PP2_TYPE_MAX_FUTURE"
+	default:
+		return fmt.Sprintf("%v", t)
+	}
+}
+
 func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TCPConnOptions, listenFunc ListenFunc, brokers HostBasedRouting) (net.Listener, error) {
 
 	l, err := listenFunc(cfg.GetListenerAddress())
@@ -373,12 +416,15 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TC
 
 			var authority string
 			if conn, ok := c.(*proxyproto.Conn); ok {
+				logrus.Info("proxy protocol v2 detected")
 				if header := conn.ProxyHeader(); header != nil {
 					tlvs, err := header.TLVs()
 					if err != nil {
 						logrus.Infof("WARNING: proxy protocol v2 had no TLVs set for accepted connection")
 					} else {
+						logrus.Infof("proxy protocol v2: %v tlvs", len(tlvs))
 						for _, tlv := range tlvs {
+							logrus.Infof("proxy protocol v2: %q = %q", PrintTLV(tlv.Type), string(tlv.Value))
 							if tlv.Type == proxyproto.PP2_TYPE_AUTHORITY {
 								authority = string(tlv.Value)
 								break
@@ -417,9 +463,9 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TC
 				}
 			}
 			if brokerId != UnknownBrokerID {
-				logrus.Infof("%s: New connection for %s brokerId %d with host/authority %s", l.Addr(), brokerAddress, brokerId, advertisedHost)
+				logrus.Infof("%s: New connection from %q for %s brokerId %d with host/authority %s", c.RemoteAddr(), l.Addr(), brokerAddress, brokerId, advertisedHost)
 			} else {
-				logrus.Infof("%s: New connection with host/authority %s", l.Addr(), advertisedHost)
+				logrus.Infof("%s: New connection from %q with host/authority %q", c.RemoteAddr(), l.Addr(), advertisedHost)
 			}
 			dst <- Conn{BrokerAddress: brokerAddress, LocalConnection: c}
 		}
