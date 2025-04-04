@@ -2,12 +2,14 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
 	"strconv"
 	"sync"
 	"text/template"
+	"time"
 
 	"github.com/grepplabs/kafka-proxy/config"
 	"github.com/grepplabs/kafka-proxy/pkg/libs/util"
@@ -38,6 +40,7 @@ type Listeners struct {
 	brokerToListenerConfig map[string]*ListenerConfig
 	lock                   sync.RWMutex
 	useMultiHostListener   bool
+	usePPv2                bool
 }
 
 func NewListeners(cfg *config.Config) (*Listeners, error) {
@@ -57,16 +60,21 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 	}
 
 	listenFunc := func(listenAddress string) (net.Listener, error) {
+		if tlsConfig != nil {
+			return tls.Listen("tcp", listenAddress, tlsConfig)
+		}
 
 		ln, err := net.Listen("tcp", listenAddress)
 		if err != nil {
 			return ln, err
 		}
-
 		// TODO: Add proxy-protocol conditional
-		fmt.Println("proxy/proxy.go: wrapping tcp listener with proxy protocol v2")
+		if cfg.Proxy.ListenerEnableProxyProtocolV2 {
+			fmt.Println("proxy/proxy.go: wrapping tcp listener with proxy protocol v2")
+			return &pp.Listener{Listener: ln}, nil
+		}
 
-		return &pp.Listener{Listener: ln}, nil
+		return ln, nil
 	}
 
 	brokerToListenerConfig, err := getBrokerToListenerConfig(cfg)
@@ -86,6 +94,7 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 		disableDynamicListeners:   cfg.Proxy.DisableDynamicListeners,
 		dynamicSequentialMinPort:  cfg.Proxy.DynamicSequentialMinPort,
 		useMultiHostListener:      true,
+		usePPv2:                   cfg.Proxy.ListenerEnableProxyProtocolV2,
 	}, nil
 }
 
@@ -224,7 +233,6 @@ func (p *Listeners) ListenDynamicInstance(brokerAddress string, brokerId int32) 
 		}
 	}
 
-	fmt.Println("proxy/proxy.go:", "NewListenerConfig", "brokerAddress", brokerAddress, "listenerAddress", listenerAddress, "brokerId", brokerId)
 	cfg := NewListenerConfig(brokerAddress, listenerAddress, "", brokerId)
 	l, err := p.listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc, p)
 	if err != nil {
@@ -233,7 +241,6 @@ func (p *Listeners) ListenDynamicInstance(brokerAddress string, brokerId int32) 
 	port := l.Addr().(*net.TCPAddr).Port
 	address := net.JoinHostPort(p.defaultListenerIP, fmt.Sprint(port))
 
-	fmt.Println("proxy/proxy.go:", "Port+Address", address)
 	dynamicAdvertisedHost, dynamicAdvertisedPort, err := p.getDynamicAdvertisedAddress(cfg.BrokerID, port)
 	if err != nil {
 		return "", 0, err
@@ -396,19 +403,26 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TC
 			}
 
 			var serverName string
-			if p.tlsConfig != nil {
-				tlsConfig := &tls.Config{}
-				tlsConfig.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
-					serverName = hello.ServerName
-					return p.tlsConfig, nil
-				}
-				tlsConn := tls.Server(c, tlsConfig)
-				err := tlsConn.Handshake()
+			if tlsConn, ok := c.(*tls.Conn); ok {
+				handshakeCtx, handshakeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				err := tlsConn.HandshakeContext(handshakeCtx)
 				if err != nil {
-					logrus.Errorf("ERROR: tls handshake failed: %s", err)
-					c.Close()
+					handshakeCancel()
+					logrus.Errorf("failed handshake: %s", err)
 				}
+				handshakeCancel()
+				serverName = tlsConn.ConnectionState().ServerName
+				logrus.Infof("Found server name: %q", serverName)
 			}
+			// if p.tlsConfig != nil {
+			// 	tlsConn := tls.Server(c, p.tlsConfig)
+
+			// 	serverName = tlsConn.ConnectionState().ServerName
+			// 	logrus.Infof("Found server name: %q", serverName)
+			// }
+
+			// We use obtain the requested server name (sometimes known as authority or host in HTTP) to identify the
+			// requested broker id, which we'll connect to behind the scene.
 
 			// When supporting proxy protocol v2, the listener might be shared.
 			// We use the authority/hostname set on the proxy protocol v2 headers.
@@ -446,8 +460,7 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TC
 			var advertisedHost string
 			if serverName != "" {
 				advertisedHost = serverName
-			}
-			if authority != "" {
+			} else if authority != "" {
 				advertisedHost = authority
 			}
 

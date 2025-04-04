@@ -10,8 +10,11 @@ import (
 
 func tlsClientCertVerificationFunc(conf *config.Config) (func([][]byte, [][]*x509.Certificate) error, error) {
 	parsedSubjects, parserErr := getParsedSubjects(conf)
+
 	if parserErr != nil {
-		return func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error { return nil }, parserErr
+		return func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			return nil
+		}, parserErr
 	}
 	return func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 		if len(parsedSubjects) == 0 {

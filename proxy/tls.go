@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -186,6 +187,7 @@ func handshakeAsTLSAndValidateClientCert(conn net.Conn, expectedCert *x509.Certi
 }
 
 func handshakeTLSConn(tlsConn *tls.Conn, timeout time.Duration) error {
+	fmt.Println("handshakeTLSConn")
 	err := tlsConn.SetDeadline(time.Now().Add(timeout))
 	if err != nil {
 		return errors.Errorf("Failed to set deadline with handshake timeout in seconds %f on connection: %v", timeout.Seconds(), err)

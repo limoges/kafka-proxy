@@ -319,6 +319,7 @@ func (c *Client) handleConn(conn Conn) {
 		_ = conn.LocalConnection.Close()
 		return
 	}
+
 	if tcpConn, ok := server.(*net.TCPConn); ok {
 		if err := c.tcpConnOptions.setTCPConnOptions(tcpConn); err != nil {
 			logrus.Infof("WARNING: Error while setting TCP options for kafka connection %s on %v: %v", conn.BrokerAddress, server.LocalAddr(), err)
@@ -331,8 +332,8 @@ func (c *Client) handleConn(conn Conn) {
 	}
 }
 
-func (c *Client) DialAndAuth(brokerAddress string) (net.Conn, error) {
-	conn, err := c.dialer.Dial("tcp", brokerAddress)
+func (c *Client) DialAndAuth(brokerAddress string) (conn net.Conn, err error) {
+	conn, err = c.dialer.Dial("tcp", brokerAddress)
 	if err != nil {
 		return nil, err
 	}
