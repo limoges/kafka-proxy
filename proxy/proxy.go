@@ -2,14 +2,12 @@ package proxy
 
 import (
 	"bytes"
-	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
 	"strconv"
 	"sync"
 	"text/template"
-	"time"
 
 	"github.com/grepplabs/kafka-proxy/config"
 	"github.com/grepplabs/kafka-proxy/pkg/libs/util"
@@ -59,21 +57,26 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 		}
 	}
 
-	listenFunc := func(listenAddress string) (net.Listener, error) {
+	listenFunc := func(listenAddress string) (ln net.Listener, err error) {
+
 		if tlsConfig != nil {
-			return tls.Listen("tcp", listenAddress, tlsConfig)
+			ln, err = tls.Listen("tcp", listenAddress, tlsConfig)
+			if err != nil {
+				return ln, err
+			}
+		} else {
+			ln, err = net.Listen("tcp", listenAddress)
+			if err != nil {
+				return ln, err
+			}
 		}
 
-		ln, err := net.Listen("tcp", listenAddress)
-		if err != nil {
-			return ln, err
-		}
-		// TODO: Add proxy-protocol conditional
-		if cfg.Proxy.ListenerEnableProxyProtocolV2 {
+		// We wrap a tcp or tls listener with proxy protocol v2.
+		// The data on the connection will look like [ppv2 headers][tls headers] tcp data.
+		if cfg.Proxy.ProxyProtocolV2.Enable {
 			fmt.Println("proxy/proxy.go: wrapping tcp listener with proxy protocol v2")
-			return &pp.Listener{Listener: ln}, nil
+			ln = &pp.Listener{Listener: ln}
 		}
-
 		return ln, nil
 	}
 
@@ -94,7 +97,7 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 		disableDynamicListeners:   cfg.Proxy.DisableDynamicListeners,
 		dynamicSequentialMinPort:  cfg.Proxy.DynamicSequentialMinPort,
 		useMultiHostListener:      true,
-		usePPv2:                   cfg.Proxy.ListenerEnableProxyProtocolV2,
+		usePPv2:                   cfg.Proxy.ProxyProtocolV2.Enable,
 	}, nil
 }
 
@@ -402,83 +405,82 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TC
 				return
 			}
 
-			var serverName string
-			if tlsConn, ok := c.(*tls.Conn); ok {
-				handshakeCtx, handshakeCancel := context.WithTimeout(context.Background(), 5*time.Second)
-				err := tlsConn.HandshakeContext(handshakeCtx)
+			// Since we support multiple encapsulated listeners, we unpack connections.
+
+			var (
+				clientServerName string
+				clientAddr       net.Addr
+				underlyingConn   net.Conn = c
+			)
+
+			// When using proxy protocol, the first bytes written to the tcp connection
+			// will contain the proxy protocol headers.
+			// It is entirely possible to have a proxy protocol v2 encapsulating a tls
+			// connection.
+			if conn, ok := underlyingConn.(*proxyproto.Conn); ok {
+				header := conn.ProxyHeader()
+				if header == nil {
+					logrus.Error("unable to read the proxy protocol headers")
+					c.Close()
+					return
+				}
+				clientAddr = header.SourceAddr
+
+				// Inspect optional TLVs for a forwarded SNI.
+				tlvs, err := header.TLVs()
 				if err != nil {
-					handshakeCancel()
-					logrus.Errorf("failed handshake: %s", err)
+					logrus.Errorf("unable to read proxy protocol TLVs")
 				}
-				handshakeCancel()
-				serverName = tlsConn.ConnectionState().ServerName
-				logrus.Infof("Found server name: %q", serverName)
+				for _, tlv := range tlvs {
+					if tlv.Type == proxyproto.PP2_TYPE_AUTHORITY {
+						clientServerName = string(tlv.Value)
+						logrus.Debugf("Discovered proxy protocol v2 authority: %s", clientServerName)
+						break
+					}
+				}
+				underlyingConn = conn.Raw()
 			}
-			// if p.tlsConfig != nil {
-			// 	tlsConn := tls.Server(c, p.tlsConfig)
 
-			// 	serverName = tlsConn.ConnectionState().ServerName
-			// 	logrus.Infof("Found server name: %q", serverName)
-			// }
-
-			// We use obtain the requested server name (sometimes known as authority or host in HTTP) to identify the
-			// requested broker id, which we'll connect to behind the scene.
-
-			// When supporting proxy protocol v2, the listener might be shared.
-			// We use the authority/hostname set on the proxy protocol v2 headers.
-			// The PP2_TYPE_AUTHORITY which should match an advertised address.
-
-			var authority string
-			if conn, ok := c.(*proxyproto.Conn); ok {
-				logrus.Info("proxy protocol v2 detected")
-				if header := conn.ProxyHeader(); header != nil {
-					tlvs, err := header.TLVs()
-					if err != nil {
-						logrus.Infof("WARNING: proxy protocol v2 had no TLVs set for accepted connection")
-					} else {
-						logrus.Infof("proxy protocol v2: %v tlvs", len(tlvs))
-						for _, tlv := range tlvs {
-							logrus.Infof("proxy protocol v2: %q = %q", PrintTLV(tlv.Type), string(tlv.Value))
-							if tlv.Type == proxyproto.PP2_TYPE_AUTHORITY {
-								authority = string(tlv.Value)
-								break
-							}
-						}
-					}
+			if conn, ok := underlyingConn.(*tls.Conn); ok {
+				err := conn.Handshake()
+				if err != nil {
+					logrus.Error("tls handshake failed: %s", err.Error())
+					c.Close()
+					return
 				}
-				if tcpConn, ok := conn.TCPConn(); ok {
-					if err := opts.setTCPConnOptions(tcpConn); err != nil {
-						logrus.Infof("WARNING: Error while setting TCP options for accepted connection %q on %v: %v", cfg.ToListenerConfig(), l.Addr().String(), err)
-					}
+
+				tlsState := conn.ConnectionState()
+				if clientServerName == "" {
+					logrus.Debugf("Discoverd server name from tls client hello: %s", clientServerName)
+					clientServerName = tlsState.ServerName
+				} else {
+					logrus.Debugf("Using proxy protocol authority %q instead of tls sni %q", clientServerName, tlsState.ServerName)
 				}
-			} else if tcpConn, ok := c.(*net.TCPConn); ok {
-				if err := opts.setTCPConnOptions(tcpConn); err != nil {
+
+				underlyingConn = conn.NetConn()
+			}
+
+			if conn, ok := underlyingConn.(*net.TCPConn); ok {
+				if err := opts.setTCPConnOptions(conn); err != nil {
 					logrus.Infof("WARNING: Error while setting TCP options for accepted connection %q on %v: %v", cfg.ToListenerConfig(), l.Addr().String(), err)
 				}
-			}
-
-			var advertisedHost string
-			if serverName != "" {
-				advertisedHost = serverName
-			} else if authority != "" {
-				advertisedHost = authority
 			}
 
 			brokerAddress := cfg.GetBrokerAddress()
 			brokerId := cfg.GetBrokerID()
 
-			if advertisedHost != "" {
-				if address, id, err := brokers.GetBrokerAddressByAdvertisedHost(advertisedHost); err == nil {
+			if clientServerName != "" {
+				if address, id, err := brokers.GetBrokerAddressByAdvertisedHost(clientServerName); err == nil {
 					brokerAddress = address
 					brokerId = id
 				} else {
-					logrus.Infof("%s: Failed to match host/authority %q with any advertised address", l.Addr(), advertisedHost)
+					logrus.Infof("%s: Failed to match host/authority %q with any advertised address", l.Addr(), clientServerName)
 				}
 			}
 			if brokerId != UnknownBrokerID {
-				logrus.Infof("%s: New connection from %q for %s brokerId %d with host/authority %s", c.RemoteAddr(), l.Addr(), brokerAddress, brokerId, advertisedHost)
+				logrus.Infof("%s: New connection from %q for %s brokerId %d with server name %s", c.RemoteAddr(), l.Addr(), brokerAddress, brokerId, clientServerName)
 			} else {
-				logrus.Infof("%s: New connection from %q with host/authority %q", c.RemoteAddr(), l.Addr(), advertisedHost)
+				logrus.Infof("%s: New connection from %q with server name %q", c.RemoteAddr(), l.Addr(), clientServerName)
 			}
 			dst <- Conn{BrokerAddress: brokerAddress, LocalConnection: c}
 		}
