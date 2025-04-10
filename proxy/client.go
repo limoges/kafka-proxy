@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"net"
@@ -15,8 +16,26 @@ import (
 
 // Conn represents a connection from a client to a specific instance.
 type Conn struct {
+	// BrokerAddress is the upstream broker resolved from client connection parameters.
 	BrokerAddress   string
 	LocalConnection net.Conn
+
+	// TLSServerName is the server name requested by the client during the tls handshake.
+	TLSServerName string
+
+	// PPv2Authority is the proxy protocol v2 header which represents the client requested server
+	// passed to the downstream proxy which terminated tls.
+	PPv2Authority string
+}
+
+func (c Conn) DownstreamServerName() string {
+	// When a connection uses both Proxy Protocol v2 and TLS, the PPv2 header precedes
+	// the TLS handshake. This allows multiple layers of proxy to carry the original
+	// client tls parameters, while using tls between the proxies.
+	if c.PPv2Authority != "" {
+		return c.PPv2Authority
+	}
+	return c.TLSServerName
 }
 
 // Client is a type to handle connecting to a Server. All fields are required
@@ -40,6 +59,7 @@ type Client struct {
 	authClient      *AuthClient
 
 	dialAddressMapping map[string]config.DialAddressMapping
+	tlsEnable          bool
 
 	kafkaClientCert *x509.Certificate
 }
@@ -147,6 +167,7 @@ func NewClient(conns *ConnSet, c *config.Config, netAddressMappingFunc config.Ne
 
 	return &Client{conns: conns, config: c, dialer: dialer, tcpConnOptions: tcpConnOptions, stopRun: make(chan struct{}, 1),
 		saslAuthByProxy: saslAuthByProxy,
+		tlsEnable:       c.Kafka.TLS.Enable,
 		authClient: &AuthClient{
 			enabled:       c.Auth.Gateway.Client.Enable,
 			magic:         c.Auth.Gateway.Client.Magic,
@@ -301,21 +322,21 @@ func (c *Client) handleConn(conn Conn) {
 		_ = conn.LocalConnection.Close()
 		return
 	}
+
 	if tcpConn, ok := server.(*net.TCPConn); ok {
 		if err := c.tcpConnOptions.setTCPConnOptions(tcpConn); err != nil {
 			logrus.Infof("WARNING: Error while setting TCP options for kafka connection %s on %v: %v", conn.BrokerAddress, server.LocalAddr(), err)
 		}
 	}
 	c.conns.Add(conn.BrokerAddress, conn.LocalConnection)
-	localDesc := "local connection on " + conn.LocalConnection.LocalAddr().String() + " from " + conn.LocalConnection.RemoteAddr().String() + " (" + conn.BrokerAddress + ")"
-	copyThenClose(c.processorConfig, server, conn.LocalConnection, conn.BrokerAddress, conn.BrokerAddress, localDesc)
+	copyThenClose(c.processorConfig, server, conn.LocalConnection, conn.BrokerAddress, conn.LocalConnection.RemoteAddr(), conn.LocalConnection.LocalAddr())
 	if err := c.conns.Remove(conn.BrokerAddress, conn.LocalConnection); err != nil {
 		logrus.Info(err)
 	}
 }
 
-func (c *Client) DialAndAuth(brokerAddress string) (net.Conn, error) {
-	conn, err := c.dialer.Dial("tcp", brokerAddress)
+func (c *Client) DialAndAuth(brokerAddress string) (conn net.Conn, err error) {
+	conn, err = c.dialer.Dial("tcp", brokerAddress)
 	if err != nil {
 		return nil, err
 	}
@@ -323,10 +344,19 @@ func (c *Client) DialAndAuth(brokerAddress string) (net.Conn, error) {
 		_ = conn.Close()
 		return nil, err
 	}
+
+	if tlsConn, ok := conn.(*tls.Conn); ok {
+		err := tlsConn.Handshake()
+		if err != nil {
+			return nil, fmt.Errorf("client handshake with upstream broker failed: %w", err)
+		}
+	}
 	err = c.auth(conn, brokerAddress)
 	if err != nil {
 		return nil, err
 	}
+
+	logrus.Info("Successfully connected to upstream:", brokerAddress)
 	return conn, nil
 }
 

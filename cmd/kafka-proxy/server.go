@@ -102,6 +102,7 @@ func initFlags() {
 	Server.Flags().IntVar(&c.Proxy.ListenerWriteBufferSize, "proxy-listener-write-buffer-size", 0, "Sets the size of the operating system's transmit buffer associated with the connection. If zero, system default is used")
 	Server.Flags().DurationVar(&c.Proxy.ListenerKeepAlive, "proxy-listener-keep-alive", 60*time.Second, "Keep alive period for an active network connection. If zero, keep-alives are disabled")
 
+	Server.Flags().BoolVar(&c.Proxy.ProxyProtocolV2.Enable, "proxy-listener-pp2-enable", false, "Whether or not to use Proxy Protocol v2 listener")
 	Server.Flags().BoolVar(&c.Proxy.TLS.Enable, "proxy-listener-tls-enable", false, "Whether or not to use TLS listener")
 	Server.Flags().DurationVar(&c.Proxy.TLS.Refresh, "proxy-listener-tls-refresh", 0*time.Second, "Interval for refreshing server TLS certificates. If set to zero, the refresh watch is disabled")
 	Server.Flags().StringVar(&c.Proxy.TLS.ListenerCertFile, "proxy-listener-cert-file", "", "PEM encoded file with server certificate")
@@ -383,7 +384,7 @@ func Run(_ *cobra.Command, _ []string) {
 
 	var g run.Group
 	{
-		// All active connections are stored in this variable.
+		// All active outbound upstream connections are stored in this variable.
 		connset := proxy.NewConnSet()
 		prometheus.MustRegister(proxy.NewCollector(connset))
 		listeners, err := proxy.NewListeners(c)
@@ -394,7 +395,8 @@ func Run(_ *cobra.Command, _ []string) {
 		if err != nil {
 			logrus.Fatal(err)
 		}
-		proxyClient, err := proxy.NewClient(connset, c, listeners.GetNetAddressMapping, localPasswordAuthenticator, localTokenAuthenticator, saslTokenProvider, gatewayTokenProvider, gatewayTokenInfo)
+
+		proxyClient, err := proxy.NewClient(connset, c, listeners.GetAdvertisedListener, localPasswordAuthenticator, localTokenAuthenticator, saslTokenProvider, gatewayTokenProvider, gatewayTokenInfo)
 		if err != nil {
 			logrus.Fatal(err)
 		}
@@ -483,7 +485,7 @@ func SetLogger() {
 		}
 		logrus.SetFormatter(formatter)
 	} else {
-		logrus.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
+		logrus.SetFormatter(&logrus.TextFormatter{FullTimestamp: false})
 	}
 	level, err := logrus.ParseLevel(c.Log.Level)
 	if err != nil {

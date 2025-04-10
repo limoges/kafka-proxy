@@ -88,6 +88,10 @@ type Config struct {
 		ListenerWriteBufferSize   int // SO_SNDBUF
 		ListenerKeepAlive         time.Duration
 
+		ProxyProtocolV2 struct {
+			Enable bool
+		}
+
 		TLS struct {
 			Enable                   bool
 			Refresh                  time.Duration
