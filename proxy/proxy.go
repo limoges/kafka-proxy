@@ -444,7 +444,14 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TC
 
 			if conn, ok := underlyingConn.(*tls.Conn); ok {
 				logrus.Info("Accepted tls connection")
+				err := conn.Handshake()
+				if err != nil {
+					logrus.Errorf("downstream server tls handshake error: %s", err)
+				}
+
 				tlsState := conn.ConnectionState()
+				logrus.Infof("Accepted tls connection with server name: %q", tlsState.ServerName)
+
 				if clientServerName == "" {
 					logrus.Debugf("Discoverd server name from tls client hello: %s", clientServerName)
 					clientServerName = tlsState.ServerName

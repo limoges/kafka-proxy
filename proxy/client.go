@@ -346,17 +346,17 @@ func (c *Client) DialAndAuth(brokerAddress string) (conn net.Conn, err error) {
 	}
 
 	if tlsConn, ok := conn.(*tls.Conn); ok {
-		fmt.Println("client uses tls")
 		err := tlsConn.Handshake()
 		if err != nil {
 			return nil, fmt.Errorf("client handshake with upstream broker failed: %w", err)
 		}
-		fmt.Println("client handshake worked")
 	}
 	err = c.auth(conn, brokerAddress)
 	if err != nil {
 		return nil, err
 	}
+
+	logrus.Info("Successfully connected to upstream:", brokerAddress)
 	return conn, nil
 }
 
