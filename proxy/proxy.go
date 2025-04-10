@@ -144,10 +144,7 @@ func getBrokerToListenerConfig(cfg *config.Config) (map[string]*ListenerConfig, 
 	return brokerToListenerConfig, nil
 }
 
-// GetAdvertisedListener uses the upstream broker host, port and id to identify the associated advertised listener.
-func (p *Listeners) GetAdvertisedListener(brokerHost string, brokerPort int32, brokerId int32) (advertisedHost string, advertisedPort int32, err error) {
-
-	// fmt.Println("proxy/proxy.go:", "Listeners.GetListenerAddress", "brokerHost", brokerHost, "brokerPort", brokerPort, "brokerId", brokerId)
+func (p *Listeners) GetNetAddressMapping(brokerHost string, brokerPort int32, brokerId int32) (advertisedHost string, advertisedPort int32, err error) {
 	if brokerHost == "" || brokerPort <= 0 {
 		return "", 0, fmt.Errorf("broker address '%s:%d' is invalid", brokerHost, brokerPort)
 	}
