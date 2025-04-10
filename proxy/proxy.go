@@ -60,11 +60,13 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 	listenFunc := func(listenAddress string) (ln net.Listener, err error) {
 
 		if tlsConfig != nil {
+			logrus.Infof("Starting tls listener", listenAddress)
 			ln, err = tls.Listen("tcp", listenAddress, tlsConfig)
 			if err != nil {
 				return ln, err
 			}
 		} else {
+			logrus.Infof("Starting tcp listener", listenAddress)
 			ln, err = net.Listen("tcp", listenAddress)
 			if err != nil {
 				return ln, err
@@ -74,7 +76,7 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 		// We wrap a tcp or tls listener with proxy protocol v2.
 		// The data on the connection will look like [ppv2 headers][tls headers] tcp data.
 		if cfg.Proxy.ProxyProtocolV2.Enable {
-			fmt.Println("proxy/proxy.go: wrapping tcp listener with proxy protocol v2")
+			logrus.Infof("Using proxy protocol v2 listener", listenAddress)
 			ln = &pp.Listener{Listener: ln}
 		}
 		return ln, nil
