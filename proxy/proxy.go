@@ -36,7 +36,6 @@ type Listeners struct {
 
 	brokerToListenerConfig map[string]*ListenerConfig
 	lock                   sync.RWMutex
-	useMultiHostListener   bool
 }
 
 func NewListeners(cfg *config.Config) (*Listeners, error) {
@@ -81,7 +80,6 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 		deterministicListeners:    cfg.Proxy.DeterministicListeners,
 		disableDynamicListeners:   cfg.Proxy.DisableDynamicListeners,
 		dynamicSequentialMinPort:  cfg.Proxy.DynamicSequentialMinPort,
-		useMultiHostListener:      true,
 	}, nil
 }
 
@@ -207,7 +205,6 @@ func (p *Listeners) ListenDynamicInstance(brokerAddress string, brokerId int32) 
 			return util.SplitHostPort(cfg.AdvertisedAddress)
 		}
 	} else {
-
 		listenerAddress = net.JoinHostPort(p.defaultListenerIP, strconv.Itoa(p.dynamicSequentialMinPort))
 		if p.dynamicSequentialMinPort != 0 {
 			p.dynamicSequentialMinPort += 1
