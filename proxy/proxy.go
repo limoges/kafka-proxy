@@ -141,16 +141,13 @@ func (p *Listeners) GetNetAddressMapping(brokerHost string, brokerPort int32, br
 		logrus.Debugf("Address mappings broker=%s, listener=%s, advertised=%s, brokerId=%d", listenerConfig.GetBrokerAddress(), listenerConfig.ListenerAddress, listenerConfig.AdvertisedAddress, brokerId)
 		return util.SplitHostPort(listenerConfig.AdvertisedAddress)
 	}
-
 	if !p.disableDynamicListeners {
 		logrus.Infof("Starting dynamic listener for broker %s", brokerAddress)
 		return p.ListenDynamicInstance(brokerAddress, brokerId)
 	}
-
 	if len(p.dynamicAdvertisedListener) == 0 {
 		return "", 0, fmt.Errorf("net address mapping for %s:%d was not found", brokerHost, brokerPort)
 	}
-
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	dynamicAdvertisedHost, dynamicAdvertisedPort, err := p.getDynamicAdvertisedAddress(brokerId, int(brokerPort))
@@ -326,49 +323,6 @@ type BrokerConfigMap interface {
 
 type HostBasedRouting interface {
 	GetBrokerAddressByAdvertisedHost(host string) (brokerAddress string, brokerId int32, err error)
-}
-
-func PrintTLV(t proxyproto.PP2Type) string {
-	switch t {
-	case proxyproto.PP2_TYPE_ALPN:
-		return "PP2_TYPE_ALPN"
-	case proxyproto.PP2_TYPE_AUTHORITY:
-		return "PP2_TYPE_AUTHORITY"
-	case proxyproto.PP2_TYPE_CRC32C:
-		return "PP2_TYPE_CRC32C"
-	case proxyproto.PP2_TYPE_NOOP:
-		return "PP2_TYPE_NOOP"
-	case proxyproto.PP2_TYPE_UNIQUE_ID:
-		return "PP2_TYPE_UNIQUE_ID"
-	case proxyproto.PP2_TYPE_SSL:
-		return "PP2_TYPE_SSL"
-	case proxyproto.PP2_SUBTYPE_SSL_VERSION:
-		return "PP2_SUBTYPE_SSL_VERSION"
-	case proxyproto.PP2_SUBTYPE_SSL_CN:
-		return "PP2_SUBTYPE_SSL_CN"
-	case proxyproto.PP2_SUBTYPE_SSL_CIPHER:
-		return "PP2_SUBTYPE_SSL_CIPHER"
-	case proxyproto.PP2_SUBTYPE_SSL_SIG_ALG:
-		return "PP2_SUBTYPE_SSL_SIG_ALG"
-	case proxyproto.PP2_SUBTYPE_SSL_KEY_ALG:
-		return "PP2_SUBTYPE_SSL_KEY_ALG"
-	case proxyproto.PP2_TYPE_NETNS:
-		return "PP2_TYPE_NETNS"
-	case proxyproto.PP2_TYPE_MIN_CUSTOM:
-		return "PP2_TYPE_MIN_CUSTOM"
-	case proxyproto.PP2_TYPE_MAX_CUSTOM:
-		return "PP2_TYPE_MAX_CUSTOM"
-	case proxyproto.PP2_TYPE_MIN_EXPERIMENT:
-		return "PP2_TYPE_MIN_EXPERIMENT"
-	case proxyproto.PP2_TYPE_MAX_EXPERIMENT:
-		return "PP2_TYPE_MAX_EXPERIMENT"
-	case proxyproto.PP2_TYPE_MIN_FUTURE:
-		return "PP2_TYPE_MIN_FUTURE"
-	case proxyproto.PP2_TYPE_MAX_FUTURE:
-		return "PP2_TYPE_MAX_FUTURE"
-	default:
-		return fmt.Sprintf("%v", t)
-	}
 }
 
 func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TCPConnOptions, listenFunc ListenFunc, brokers HostBasedRouting) (net.Listener, error) {
