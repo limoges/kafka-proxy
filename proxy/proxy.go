@@ -11,7 +11,6 @@ import (
 
 	"github.com/grepplabs/kafka-proxy/config"
 	"github.com/grepplabs/kafka-proxy/pkg/libs/util"
-	"github.com/pires/go-proxyproto"
 	"github.com/sirupsen/logrus"
 )
 
@@ -58,10 +57,8 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 		if tlsConfig != nil {
 			logrus.Infof("Starting tls listener", listenAddress)
 			return tls.Listen("tcp", listenAddress, tlsConfig)
-		} else {
-			logrus.Infof("Starting tcp listener", listenAddress)
-			return net.Listen("tcp", listenAddress)
 		}
+		return net.Listen("tcp", listenAddress)
 	}
 
 	brokerToListenerConfig, err := getBrokerToListenerConfig(cfg)
@@ -274,19 +271,17 @@ func (p *Listeners) templateDynamicAdvertisedAddress(brokerID int32) (string, er
 
 func (p *Listeners) GetBrokerAddressByAdvertisedHost(host string) (brokerAddress string, brokerId int32, err error) {
 
-	// TODO: Use a better algorithm than a forloop
-	// Maybe use a bi-directional map? I believe downstream hostport always has only one upstream hostport.
+	// TODO: Use a better algorithm than a for loop
+	// Maybe use a bi-directional map? I believe downstream host-port always has only one upstream hostport.
 	for brokerAddr, c := range p.brokerToListenerConfig {
 		if c == nil {
 			continue
 		}
-		// fmt.Println("Comparing", "host", host, "advertisedAddress", c.GetAdvertisedAddress())
 		advertisedHost, _, err := net.SplitHostPort(c.GetAdvertisedAddress())
 		if err != nil {
 			fmt.Println("failed to split address", err)
 		}
 		if advertisedHost == host {
-			// fmt.Println("Match!", "brokerAddr", brokerAddr, "brokerID", c.GetBrokerID(), "advertisedAddress", c.GetAdvertisedAddress())
 			return brokerAddr, c.GetBrokerID(), nil
 		}
 	}
@@ -294,12 +289,10 @@ func (p *Listeners) GetBrokerAddressByAdvertisedHost(host string) (brokerAddress
 	return "", 0, fmt.Errorf("broker not found for advertised host %q", host)
 }
 
-// ListenInstances creates listeners from static configuration.
 func (p *Listeners) ListenInstances(cfgs []config.ListenerConfig) (<-chan Conn, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	// allows multiple local addresses to point to the remote
 	for _, v := range cfgs {
 		cfg := FromListenerConfig(v)
 		_, err := p.listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc, p)
@@ -337,42 +330,11 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TC
 				return
 			}
 
-			// Since we support multiple encapsulated listeners, we unpack connections.
-
 			var (
 				clientServerName string
 				clientIP         string
 				underlyingConn   net.Conn = c
 			)
-
-			// When using proxy protocol, the first bytes written to the tcp connection
-			// will contain the proxy protocol headers.
-			// It is entirely possible to have a proxy protocol v2 encapsulating a tls
-			// connection.
-			if conn, ok := underlyingConn.(*proxyproto.Conn); ok {
-				logrus.Info("Accepted proxy protocol v2 connection")
-				header := conn.ProxyHeader()
-				if header == nil {
-					logrus.Error("unable to read the proxy protocol headers")
-					c.Close()
-					return
-				}
-				clientIP = header.SourceAddr.String()
-
-				// Inspect optional TLVs for a forwarded SNI.
-				tlvs, err := header.TLVs()
-				if err != nil {
-					logrus.Errorf("unable to read proxy protocol TLVs")
-				}
-				for _, tlv := range tlvs {
-					if tlv.Type == proxyproto.PP2_TYPE_AUTHORITY {
-						clientServerName = string(tlv.Value)
-						logrus.Debugf("Discovered proxy protocol v2 authority: %s", clientServerName)
-						break
-					}
-				}
-				underlyingConn = conn.Raw()
-			}
 
 			if conn, ok := underlyingConn.(*tls.Conn); ok {
 				logrus.Info("Accepted tls connection")
@@ -380,7 +342,6 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TC
 				if err != nil {
 					logrus.Errorf("downstream server tls handshake error: %s", err)
 				}
-
 				tlsState := conn.ConnectionState()
 				logrus.Infof("Accepted tls connection with server name: %q", tlsState.ServerName)
 
@@ -433,7 +394,7 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TC
 					clientServerName,
 				)
 			}
-			dst <- Conn{BrokerAddress: brokerAddress, LocalConnection: c}
+			dst <- Conn{BrokerAddress: cfg.GetBrokerAddress(), LocalConnection: c}
 		}
 	})
 	if cfg.GetBrokerID() != UnknownBrokerID {
