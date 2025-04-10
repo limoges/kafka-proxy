@@ -409,7 +409,7 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TC
 
 			var (
 				clientServerName string
-				clientAddr       net.Addr
+				clientIP         string
 				underlyingConn   net.Conn = c
 			)
 
@@ -424,7 +424,7 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TC
 					c.Close()
 					return
 				}
-				clientAddr = header.SourceAddr
+				clientIP = header.SourceAddr.String()
 
 				// Inspect optional TLVs for a forwarded SNI.
 				tlvs, err := header.TLVs()
@@ -477,10 +477,28 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TC
 					logrus.Infof("%s: Failed to match host/authority %q with any advertised address", l.Addr(), clientServerName)
 				}
 			}
-			if brokerId != UnknownBrokerID {
-				logrus.Infof("%s: New connection from %q for %s brokerId %d with server name %s", c.RemoteAddr(), l.Addr(), brokerAddress, brokerId, clientServerName)
+
+			var client string
+			if clientIP != "" {
+				client = fmt.Sprintf("%s via %s", clientIP, c.RemoteAddr().String())
 			} else {
-				logrus.Infof("%s: New connection from %q with server name %q", c.RemoteAddr(), l.Addr(), clientServerName)
+				client = c.RemoteAddr().String()
+			}
+
+			if brokerId != UnknownBrokerID {
+				logrus.Infof("%s: New connection from %q for %s brokerId %d with server name %s",
+					l.Addr(),
+					client,
+					brokerAddress,
+					brokerId,
+					clientServerName,
+				)
+			} else {
+				logrus.Infof("%s: New connection from %q with server name %q",
+					l.Addr(),
+					client,
+					clientServerName,
+				)
 			}
 			dst <- Conn{BrokerAddress: brokerAddress, LocalConnection: c}
 		}

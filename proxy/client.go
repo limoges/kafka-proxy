@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"net"
@@ -58,6 +59,7 @@ type Client struct {
 	authClient      *AuthClient
 
 	dialAddressMapping map[string]config.DialAddressMapping
+	tlsEnable          bool
 
 	kafkaClientCert *x509.Certificate
 }
@@ -165,6 +167,7 @@ func NewClient(conns *ConnSet, c *config.Config, netAddressMappingFunc config.Ne
 
 	return &Client{conns: conns, config: c, dialer: dialer, tcpConnOptions: tcpConnOptions, stopRun: make(chan struct{}, 1),
 		saslAuthByProxy: saslAuthByProxy,
+		tlsEnable:       c.Kafka.TLS.Enable,
 		authClient: &AuthClient{
 			enabled:       c.Auth.Gateway.Client.Enable,
 			magic:         c.Auth.Gateway.Client.Magic,
@@ -340,6 +343,15 @@ func (c *Client) DialAndAuth(brokerAddress string) (conn net.Conn, err error) {
 	if err := conn.SetDeadline(time.Time{}); err != nil {
 		_ = conn.Close()
 		return nil, err
+	}
+
+	if tlsConn, ok := conn.(*tls.Conn); ok {
+		fmt.Println("client uses tls")
+		err := tlsConn.Handshake()
+		if err != nil {
+			return nil, fmt.Errorf("client handshake with upstream broker failed: %w", err)
+		}
+		fmt.Println("client handshake worked")
 	}
 	err = c.auth(conn, brokerAddress)
 	if err != nil {
