@@ -12,7 +12,6 @@ import (
 	"github.com/grepplabs/kafka-proxy/config"
 	"github.com/grepplabs/kafka-proxy/pkg/libs/util"
 	"github.com/pires/go-proxyproto"
-	pp "github.com/pires/go-proxyproto"
 	"github.com/sirupsen/logrus"
 )
 
@@ -38,7 +37,6 @@ type Listeners struct {
 	brokerToListenerConfig map[string]*ListenerConfig
 	lock                   sync.RWMutex
 	useMultiHostListener   bool
-	usePPv2                bool
 }
 
 func NewListeners(cfg *config.Config) (*Listeners, error) {
@@ -58,28 +56,13 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 	}
 
 	listenFunc := func(listenAddress string) (ln net.Listener, err error) {
-
 		if tlsConfig != nil {
 			logrus.Infof("Starting tls listener", listenAddress)
-			ln, err = tls.Listen("tcp", listenAddress, tlsConfig)
-			if err != nil {
-				return ln, err
-			}
+			return tls.Listen("tcp", listenAddress, tlsConfig)
 		} else {
 			logrus.Infof("Starting tcp listener", listenAddress)
-			ln, err = net.Listen("tcp", listenAddress)
-			if err != nil {
-				return ln, err
-			}
+			return net.Listen("tcp", listenAddress)
 		}
-
-		// We wrap a tcp or tls listener with proxy protocol v2.
-		// The data on the connection will look like [ppv2 headers][tls headers] tcp data.
-		if cfg.Proxy.ProxyProtocolV2.Enable {
-			logrus.Infof("Using proxy protocol v2 listener", listenAddress)
-			ln = &pp.Listener{Listener: ln}
-		}
-		return ln, nil
 	}
 
 	brokerToListenerConfig, err := getBrokerToListenerConfig(cfg)
@@ -99,7 +82,6 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 		disableDynamicListeners:   cfg.Proxy.DisableDynamicListeners,
 		dynamicSequentialMinPort:  cfg.Proxy.DynamicSequentialMinPort,
 		useMultiHostListener:      true,
-		usePPv2:                   cfg.Proxy.ProxyProtocolV2.Enable,
 	}, nil
 }
 
