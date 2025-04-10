@@ -418,6 +418,7 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TC
 			// It is entirely possible to have a proxy protocol v2 encapsulating a tls
 			// connection.
 			if conn, ok := underlyingConn.(*proxyproto.Conn); ok {
+				logrus.Info("Accepted proxy protocol v2 connection")
 				header := conn.ProxyHeader()
 				if header == nil {
 					logrus.Error("unable to read the proxy protocol headers")
@@ -442,13 +443,7 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TC
 			}
 
 			if conn, ok := underlyingConn.(*tls.Conn); ok {
-				err := conn.Handshake()
-				if err != nil {
-					logrus.Error("tls handshake failed: %s", err.Error())
-					c.Close()
-					return
-				}
-
+				logrus.Info("Accepted tls connection")
 				tlsState := conn.ConnectionState()
 				if clientServerName == "" {
 					logrus.Debugf("Discoverd server name from tls client hello: %s", clientServerName)
@@ -456,7 +451,6 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TC
 				} else {
 					logrus.Debugf("Using proxy protocol authority %q instead of tls sni %q", clientServerName, tlsState.ServerName)
 				}
-
 				underlyingConn = conn.NetConn()
 			}
 
