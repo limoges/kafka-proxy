@@ -184,7 +184,6 @@ func (p *Listeners) nextDynamicPort(portOffset uint64, brokerAddress string, bro
 
 func (p *Listeners) ListenDynamicInstance(brokerAddress string, brokerId int32) (string, int32, error) {
 
-	fmt.Println("proxy/proxy.go: ListenDynamicInstance:", "brokerAddress", brokerAddress, "brokerId", brokerId)
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	// double check
@@ -229,7 +228,7 @@ func (p *Listeners) ListenDynamicInstance(brokerAddress string, brokerId int32) 
 	}
 
 	cfg := NewListenerConfig(brokerAddress, listenerAddress, "", brokerId)
-	l, err := p.listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc, p)
+	l, err := listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc, p)
 	if err != nil {
 		return "", 0, err
 	}
