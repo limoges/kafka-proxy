@@ -371,15 +371,15 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg *ListenerConfig, opts TC
 			}
 
 			brokerAddress := cfg.GetBrokerAddress()
-			brokerId := cfg.GetBrokerID()
+			brokerId := cfg.BrokerID
 
 			if clientServerName != "" {
-				if address, id, err := brokers.GetBrokerAddressByAdvertisedHost(clientServerName); err == nil {
-					brokerAddress = address
-					brokerId = id
-				} else {
-					logrus.Infof("%s: Failed to match host/authority %q with any advertised address", l.Addr(), clientServerName)
+				address, id, err := p.GetBrokerAddressByAdvertisedHost(clientServerName)
+				if err != nil {
+					logrus.Errorf("failed to match server name %q with any advertised address", clientServerName)
 				}
+				brokerAddress = address
+				brokerId = id
 			}
 
 			if brokerId == UnknownBrokerID {
