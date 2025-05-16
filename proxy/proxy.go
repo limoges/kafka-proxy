@@ -294,12 +294,12 @@ func (p *Listeners) GetBrokerAddressByAdvertisedHost(host string) (brokerAddress
 		if c == nil {
 			continue
 		}
-		advertisedHost, _, err := net.SplitHostPort(c.GetAdvertisedAddress())
+		advertisedHost, _, err := net.SplitHostPort(c.AdvertisedAddress)
 		if err != nil {
 			fmt.Println("failed to split address", err)
 		}
 		if advertisedHost == host {
-			return brokerAddr, c.GetBrokerID(), nil
+			return brokerAddr, c.BrokerID, nil
 		}
 	}
 
@@ -320,7 +320,7 @@ func (p *Listeners) ListenInstances(cfgs []config.ListenerConfig) (<-chan Conn, 
 	return p.connSrc, nil
 }
 
-func (p *Listeners) listenInstance(dst chan<- Conn, cfg *ListenerConfig, opts TCPConnOptions, listenFunc ListenFunc) (net.Listener, error) {
+func listenInstance(dst chan<- Conn, cfg *ListenerConfig, opts TCPConnOptions, listenFunc ListenFunc) (net.Listener, error) {
 	l, err := listenFunc(cfg)
 	if err != nil {
 		return nil, err
