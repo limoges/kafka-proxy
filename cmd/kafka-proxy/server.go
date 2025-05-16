@@ -484,7 +484,7 @@ func SetLogger() {
 		}
 		logrus.SetFormatter(formatter)
 	} else {
-		logrus.SetFormatter(&logrus.TextFormatter{FullTimestamp: false})
+		logrus.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
 	}
 	level, err := logrus.ParseLevel(c.Log.Level)
 	if err != nil {
