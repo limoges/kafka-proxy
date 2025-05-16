@@ -369,7 +369,6 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg *ListenerConfig, opts TC
 					logrus.Infof("WARNING: Error while setting TCP options for accepted connection %q on %v: %v", cfg.ToListenerConfig(), l.Addr().String(), err)
 				}
 			}
-
 			brokerAddress := cfg.GetBrokerAddress()
 			brokerId := cfg.BrokerID
 			if clientServerName != "" {
