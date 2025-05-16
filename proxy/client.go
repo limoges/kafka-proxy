@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"crypto/tls"
 	"crypto/x509"
 	"fmt"
 	"net"
@@ -324,19 +323,10 @@ func (c *Client) DialAndAuth(downstream Conn, brokerAddress string) (conn net.Co
 		_ = conn.Close()
 		return nil, err
 	}
-
-	if tlsConn, ok := conn.(*tls.Conn); ok {
-		err := tlsConn.Handshake()
-		if err != nil {
-			return nil, fmt.Errorf("client handshake with upstream broker failed: %w", err)
-		}
-	}
 	err = c.auth(conn, brokerAddress)
 	if err != nil {
 		return nil, err
 	}
-
-	logrus.Infof("%s: Client(%s) Successfully connected to upstream: %s", downstream.LocalConnection.LocalAddr(), downstream.LocalConnection.RemoteAddr(), brokerAddress)
 	return conn, nil
 }
 
