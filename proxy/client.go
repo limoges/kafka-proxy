@@ -314,7 +314,7 @@ func (c *Client) handleConn(conn Conn) {
 	}
 }
 
-func (c *Client) DialAndAuth(downstream Conn, brokerAddress string) (conn net.Conn, err error) {
+func (c *Client) DialAndAuth(brokerAddress string) (conn net.Conn, err error) {
 	conn, err = c.dialer.Dial("tcp", brokerAddress)
 	if err != nil {
 		return nil, err
