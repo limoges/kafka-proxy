@@ -9,6 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// BrokerMap maintains a map of usptream brokers, associated listeners and avertised addresses.
 type BrokerMap struct {
 	listenerConfigs map[string]*ListenerConfig
 }

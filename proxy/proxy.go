@@ -180,7 +180,7 @@ func (p *Listeners) ListenDynamicInstance(brokerAddress string, brokerId int32) 
 		}
 	}
 	cfg := NewListenerConfig(brokerAddress, listenerAddress, "", brokerId)
-	l, err := listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc, p.brokerMap.GetBrokerByAdvertisedHost)
+	l, err := listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc, p.brokerMap)
 	if err != nil {
 		return "", 0, err
 	}
@@ -240,15 +240,13 @@ func (p *Listeners) templateDynamicAdvertisedAddress(brokerID int32) (string, er
 	return buf.String(), nil
 }
 
-type BrokersByNameFunc func(host string) (brokerAddress string, brokerId int32, err error)
-
 func (p *Listeners) ListenInstances(cfgs []config.ListenerConfig) (<-chan Conn, error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
 	for _, v := range cfgs {
 		cfg := FromListenerConfig(v)
-		_, err := listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc, p.brokerMap.GetBrokerByAdvertisedHost)
+		_, err := listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc, p.brokerMap)
 		if err != nil {
 			return nil, err
 		}
@@ -256,7 +254,7 @@ func (p *Listeners) ListenInstances(cfgs []config.ListenerConfig) (<-chan Conn, 
 	return p.connSrc, nil
 }
 
-func listenInstance(dst chan<- Conn, cfg *ListenerConfig, opts TCPConnOptions, listenFunc ListenFunc, brokersByAdvertisedName BrokersByNameFunc) (net.Listener, error) {
+func listenInstance(dst chan<- Conn, cfg *ListenerConfig, opts TCPConnOptions, listenFunc ListenFunc, brokerMap *BrokerMap) (net.Listener, error) {
 	l, err := listenFunc(cfg)
 	if err != nil {
 		return nil, err
@@ -302,7 +300,7 @@ func listenInstance(dst chan<- Conn, cfg *ListenerConfig, opts TCPConnOptions, l
 			brokerAddress := cfg.GetBrokerAddress()
 			brokerId := cfg.BrokerID
 			if serverName != "" {
-				address, id, err := brokersByAdvertisedName(serverName)
+				address, id, err := brokerMap.GetBrokerByAdvertisedHost(serverName)
 				if err != nil {
 					logrus.Errorf("failed to match server name %q with any advertised address", serverName)
 				}
