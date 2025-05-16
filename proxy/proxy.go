@@ -385,9 +385,8 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg *ListenerConfig, opts TC
 			if brokerId == UnknownBrokerID {
 				logrus.Infof("%s: Client(%s) connected with server name %q", l.Addr(), c.RemoteAddr().String(), clientServerName)
 			} else {
-				logrus.Infof("%s: Client(%s) connected for %s brokerId %d with server name %s", l.Addr(), c.RemoteAddr().String(), brokerAddress, brokerId, clientServerName)
+				logrus.Infof("New connection for %s", brokerAddress)
 			}
-			logrus.Infof("%s: Client(%s) proxying starting", l.Addr(), c.RemoteAddr().String())
 			dst <- Conn{BrokerAddress: brokerAddress, LocalConnection: c}
 		}
 	})
