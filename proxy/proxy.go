@@ -34,8 +34,8 @@ type Listeners struct {
 	currentDynamicPortCounter uint64
 	dynamicSequentialMaxPorts uint16
 
-	brokerToListenerConfig map[string]*ListenerConfig
-	lock                   sync.RWMutex
+	brokerMap *BrokerMap
+	lock      sync.RWMutex
 }
 
 func NewListeners(cfg *config.Config) (*Listeners, error) {
@@ -61,7 +61,7 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 		return net.Listen("tcp", cfg.ListenerAddress)
 	}
 
-	brokerToListenerConfig, err := getBrokerToListenerConfig(cfg)
+	brokerMap, err := buildBrokerMap(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 		defaultListenerIP:         cfg.Proxy.DefaultListenerIP,
 		dynamicAdvertisedListener: cfg.Proxy.DynamicAdvertisedListener,
 		connSrc:                   make(chan Conn, 1),
-		brokerToListenerConfig:    brokerToListenerConfig,
+		brokerMap:                 brokerMap,
 		tcpConnOptions:            tcpConnOptions,
 		listenFunc:                listenFunc,
 		deterministicListeners:    cfg.Proxy.DeterministicListeners,
@@ -81,18 +81,18 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 	}, nil
 }
 
-func getBrokerToListenerConfig(cfg *config.Config) (map[string]*ListenerConfig, error) {
-	brokerToListenerConfig := make(map[string]*ListenerConfig)
+func buildBrokerMap(cfg *config.Config) (*BrokerMap, error) {
+	brokerMap := NewBrokerMap()
 
 	for _, v := range cfg.Proxy.BootstrapServers {
-		if lc, ok := brokerToListenerConfig[v.BrokerAddress]; ok {
+		if lc, ok := brokerMap.GetListenerConfig(v.BrokerAddress); ok {
 			if lc.ListenerAddress != v.ListenerAddress || lc.AdvertisedAddress != v.AdvertisedAddress {
 				return nil, fmt.Errorf("bootstrap server mapping %s configured twice: %v and %v", v.BrokerAddress, v, lc.ToListenerConfig())
 			}
 			continue
 		}
 		logrus.Infof("Bootstrap server %s advertised as %s", v.BrokerAddress, v.AdvertisedAddress)
-		brokerToListenerConfig[v.BrokerAddress] = FromListenerConfig(v)
+		brokerMap.SetListenerConfig(v.BrokerAddress, FromListenerConfig(v))
 	}
 
 	externalToListenerConfig := make(map[string]config.ListenerConfig)
@@ -110,16 +110,16 @@ func getBrokerToListenerConfig(cfg *config.Config) (map[string]*ListenerConfig, 
 	}
 
 	for _, v := range externalToListenerConfig {
-		if lc, ok := brokerToListenerConfig[v.BrokerAddress]; ok {
+		if lc, ok := brokerMap.GetListenerConfig(v.BrokerAddress); ok {
 			if lc.AdvertisedAddress != v.AdvertisedAddress {
 				return nil, fmt.Errorf("bootstrap and external server mappings %s with different advertised addresses: %v and %v", v.BrokerAddress, v.ListenerAddress, lc.AdvertisedAddress)
 			}
 			continue
 		}
 		logrus.Infof("External server %s advertised as %s", v.BrokerAddress, v.AdvertisedAddress)
-		brokerToListenerConfig[v.BrokerAddress] = FromListenerConfig(v)
+		brokerMap.SetListenerConfig(v.BrokerAddress, FromListenerConfig(v))
 	}
-	return brokerToListenerConfig, nil
+	return brokerMap, nil
 }
 
 func (p *Listeners) GetNetAddressMapping(brokerHost string, brokerPort int32, brokerId int32) (advertisedHost string, advertisedPort int32, err error) {
@@ -130,7 +130,7 @@ func (p *Listeners) GetNetAddressMapping(brokerHost string, brokerPort int32, br
 	brokerAddress := net.JoinHostPort(brokerHost, fmt.Sprint(brokerPort))
 
 	p.lock.RLock()
-	listenerConfig, ok := p.brokerToListenerConfig[brokerAddress]
+	listenerConfig, ok := p.brokerMap.GetListenerConfig(brokerAddress)
 	p.lock.RUnlock()
 
 	if ok {
@@ -156,17 +156,12 @@ func (p *Listeners) GetNetAddressMapping(brokerHost string, brokerPort int32, br
 		net.JoinHostPort(dynamicAdvertisedHost, fmt.Sprint(dynamicAdvertisedPort)),
 		brokerId,
 	)
-	p.brokerToListenerConfig[brokerAddress] = cfg
-	return util.SplitHostPort(cfg.GetAdvertisedAddress())
+	p.brokerMap.SetListenerConfig(brokerAddress, cfg)
+	return util.SplitHostPort(cfg.AdvertisedAddress)
 }
 
 func (p *Listeners) findListenerConfig(brokerId int32) *ListenerConfig {
-	for _, listenerConfig := range p.brokerToListenerConfig {
-		if listenerConfig.BrokerID == brokerId {
-			return listenerConfig
-		}
-	}
-	return nil
+	return p.brokerMap.FindListenerConfig(brokerId)
 }
 
 // Make sure all dynamically allocated ports are within the half open interval
@@ -186,7 +181,7 @@ func (p *Listeners) ListenDynamicInstance(brokerAddress string, brokerId int32) 
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	// double check
-	if v, ok := p.brokerToListenerConfig[brokerAddress]; ok {
+	if v, ok := p.brokerMap.GetListenerConfig(brokerAddress); ok {
 		return util.SplitHostPort(v.AdvertisedAddress)
 	}
 
@@ -200,13 +195,13 @@ func (p *Listeners) ListenDynamicInstance(brokerAddress string, brokerId int32) 
 			return "", 0, err
 		}
 		listenerAddress = net.JoinHostPort(p.defaultListenerIP, strconv.Itoa(int(deterministicPort)))
-		cfg := p.findListenerConfig(brokerId)
+		cfg := p.brokerMap.FindListenerConfig(brokerId)
 		if cfg != nil {
 			oldBrokerAddress := cfg.GetBrokerAddress()
 			if oldBrokerAddress != brokerAddress {
-				delete(p.brokerToListenerConfig, oldBrokerAddress)
+				p.brokerMap.DeleteListenerConfig(oldBrokerAddress)
 				cfg.SetBrokerAddress(brokerAddress)
-				p.brokerToListenerConfig[brokerAddress] = cfg
+				p.brokerMap.SetListenerConfig(brokerAddress, cfg)
 				logrus.Infof("Broker address changed listener %s for new address %s old address %s brokerId %d advertised as %s", cfg.ListenerAddress, cfg.GetBrokerAddress(), oldBrokerAddress, cfg.BrokerID, cfg.AdvertisedAddress)
 			}
 			return util.SplitHostPort(cfg.AdvertisedAddress)
@@ -226,7 +221,7 @@ func (p *Listeners) ListenDynamicInstance(brokerAddress string, brokerId int32) 
 		}
 	}
 	cfg := NewListenerConfig(brokerAddress, listenerAddress, "", brokerId)
-	l, err := listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc)
+	l, err := listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc, p.brokerMap.GetBrokerByAdvertisedHost)
 	if err != nil {
 		return "", 0, err
 	}
@@ -240,7 +235,7 @@ func (p *Listeners) ListenDynamicInstance(brokerAddress string, brokerId int32) 
 	cfg.AdvertisedAddress = net.JoinHostPort(dynamicAdvertisedHost, fmt.Sprint(dynamicAdvertisedPort))
 	cfg.ListenerAddress = address
 
-	p.brokerToListenerConfig[brokerAddress] = cfg
+	p.brokerMap.SetListenerConfig(brokerAddress, cfg)
 	logrus.Infof("Dynamic listener %s for broker %s brokerId %d advertised as %s", cfg.ListenerAddress, cfg.GetBrokerAddress(), cfg.BrokerID, cfg.AdvertisedAddress)
 
 	return dynamicAdvertisedHost, int32(dynamicAdvertisedPort), nil
@@ -286,25 +281,7 @@ func (p *Listeners) templateDynamicAdvertisedAddress(brokerID int32) (string, er
 	return buf.String(), nil
 }
 
-func (p *Listeners) GetBrokerAddressByAdvertisedHost(host string) (brokerAddress string, brokerId int32, err error) {
-
-	// TODO: Use a better algorithm than a for loop
-	// Maybe use a bi-directional map? I believe downstream host-port always has only one upstream hostport.
-	for brokerAddr, c := range p.brokerToListenerConfig {
-		if c == nil {
-			continue
-		}
-		advertisedHost, _, err := net.SplitHostPort(c.AdvertisedAddress)
-		if err != nil {
-			fmt.Println("failed to split address", err)
-		}
-		if advertisedHost == host {
-			return brokerAddr, c.BrokerID, nil
-		}
-	}
-
-	return "", 0, fmt.Errorf("broker not found for advertised host %q", host)
-}
+type BrokersByNameFunc func(host string) (brokerAddress string, brokerId int32, err error)
 
 func (p *Listeners) ListenInstances(cfgs []config.ListenerConfig) (<-chan Conn, error) {
 	p.lock.Lock()
@@ -312,7 +289,7 @@ func (p *Listeners) ListenInstances(cfgs []config.ListenerConfig) (<-chan Conn, 
 
 	for _, v := range cfgs {
 		cfg := FromListenerConfig(v)
-		_, err := listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc)
+		_, err := listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc, p.brokerMap.GetBrokerByAdvertisedHost)
 		if err != nil {
 			return nil, err
 		}
@@ -320,7 +297,7 @@ func (p *Listeners) ListenInstances(cfgs []config.ListenerConfig) (<-chan Conn, 
 	return p.connSrc, nil
 }
 
-func listenInstance(dst chan<- Conn, cfg *ListenerConfig, opts TCPConnOptions, listenFunc ListenFunc) (net.Listener, error) {
+func listenInstance(dst chan<- Conn, cfg *ListenerConfig, opts TCPConnOptions, listenFunc ListenFunc, brokersByAdvertisedName BrokersByNameFunc) (net.Listener, error) {
 	l, err := listenFunc(cfg)
 	if err != nil {
 		return nil, err
@@ -335,31 +312,25 @@ func listenInstance(dst chan<- Conn, cfg *ListenerConfig, opts TCPConnOptions, l
 			}
 
 			var (
-				clientServerName string
-				underlyingConn   net.Conn = c
+				serverName     string
+				underlyingConn net.Conn = c
 			)
-
 			if conn, ok := underlyingConn.(*tls.Conn); ok {
-				logrus.Infof("%s: Client(%s) Accepted tls connection", l.Addr().String(), c.RemoteAddr().String())
-
-				tlsState := conn.ConnectionState()
-
-				if !tlsState.HandshakeComplete {
+				if !conn.ConnectionState().HandshakeComplete {
 					err := conn.Handshake()
 					if err != nil {
 						logrus.Warnf("downstream client tls handshake error: %s", err)
 					}
 				}
-				tlsState = conn.ConnectionState()
-
-				logrus.Infof("%s: Client(%s) Accepted tls connection with server name: %q", l.Addr().String(), c.RemoteAddr().String(), tlsState.ServerName)
-				if tlsState.ServerName == "" {
+				state := conn.ConnectionState()
+				logrus.Infof("%s: Client(%s) Accepted tls connection with server name: %q", l.Addr().String(), c.RemoteAddr().String(), state.ServerName)
+				if state.ServerName == "" {
 					logrus.Warnf("%s: Client(%s) tls server name could not be read, defaulting to advertised %s", l.Addr().String(), c.RemoteAddr().String(), cfg.AdvertisedAddress)
 					advertisedHost, _, _ := net.SplitHostPort(cfg.AdvertisedAddress)
-					clientServerName = advertisedHost
+					serverName = advertisedHost
 				} else {
-					clientServerName = tlsState.ServerName
-					logrus.Infof("%s: Client(%s) Discovered server name from tls client hello: %s", l.Addr().String(), c.RemoteAddr().String(), clientServerName)
+					serverName = state.ServerName
+					logrus.Infof("%s: Client(%s) Discovered server name from tls client hello: %s", l.Addr().String(), c.RemoteAddr().String(), serverName)
 				}
 				underlyingConn = conn.NetConn()
 			}
@@ -371,17 +342,17 @@ func listenInstance(dst chan<- Conn, cfg *ListenerConfig, opts TCPConnOptions, l
 			}
 			brokerAddress := cfg.GetBrokerAddress()
 			brokerId := cfg.BrokerID
-			if clientServerName != "" {
-				address, id, err := p.GetBrokerAddressByAdvertisedHost(clientServerName)
+			if serverName != "" {
+				address, id, err := brokersByAdvertisedName(serverName)
 				if err != nil {
-					logrus.Errorf("failed to match server name %q with any advertised address", clientServerName)
+					logrus.Errorf("failed to match server name %q with any advertised address", serverName)
 				}
 				brokerAddress = address
 				brokerId = id
 			}
 
 			if brokerId == UnknownBrokerID {
-				logrus.Infof("%s: Client(%s) connected with server name %q", l.Addr(), c.RemoteAddr().String(), clientServerName)
+				logrus.Infof("%s: Client(%s) connected with server name %q", l.Addr(), c.RemoteAddr().String(), serverName)
 			} else {
 				logrus.Infof("New connection for %s", brokerAddress)
 			}
