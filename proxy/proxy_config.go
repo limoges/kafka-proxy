@@ -1,9 +1,8 @@
 package proxy
 
 import (
-	"sync/atomic"
-
 	"github.com/grepplabs/kafka-proxy/config"
+	"sync/atomic"
 )
 
 const UnknownBrokerID = -1
