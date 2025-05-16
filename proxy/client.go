@@ -314,8 +314,8 @@ func (c *Client) handleConn(conn Conn) {
 	}
 }
 
-func (c *Client) DialAndAuth(brokerAddress string) (conn net.Conn, err error) {
-	conn, err = c.dialer.Dial("tcp", brokerAddress)
+func (c *Client) DialAndAuth(brokerAddress string) (net.Conn, error) {
+	conn, err := c.dialer.Dial("tcp", brokerAddress)
 	if err != nil {
 		return nil, err
 	}
