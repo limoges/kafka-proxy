@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"fmt"
 	"sync/atomic"
 
 	"github.com/grepplabs/kafka-proxy/config"
@@ -51,22 +50,6 @@ func (c *ListenerConfig) GetBrokerAddress() string {
 	return *addressPtr
 }
 
-func (c *ListenerConfig) GetListenerAddress() string {
-	return c.ListenerAddress
-}
-
-func (c *ListenerConfig) GetBrokerID() int32 {
-	return c.BrokerID
-}
-
-func (c *ListenerConfig) GetAdvertisedAddress() string {
-	return c.AdvertisedAddress
-}
-
 func (c *ListenerConfig) SetBrokerAddress(address string) {
 	c.BrokerAddressPtr.Store(&address)
-}
-
-func (c *ListenerConfig) String() string {
-	return fmt.Sprintf("ListenerConfig[%d]: %s->%s->%s", c.BrokerID, c.AdvertisedAddress, c.ListenerAddress, c.GetBrokerAddress())
 }
