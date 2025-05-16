@@ -54,7 +54,7 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 		}
 	}
 
-	listenFunc := func(cfg *ListenerConfig) (ln net.Listener, err error) {
+	listenFunc := func(cfg *ListenerConfig) (net.Listener, error) {
 		if tlsConfig != nil {
 			return tls.Listen("tcp", cfg.ListenerAddress, tlsConfig)
 		}
