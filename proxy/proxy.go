@@ -61,7 +61,7 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 		return net.Listen("tcp", cfg.ListenerAddress)
 	}
 
-	brokerMap, err := buildBrokerMap(cfg)
+	brokerMap, err := NewBrokerMap(BrokerMapConfig(cfg))
 	if err != nil {
 		return nil, err
 	}
@@ -79,47 +79,6 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 		currentDynamicPortCounter: 0,
 		dynamicSequentialMaxPorts: cfg.Proxy.DynamicSequentialMaxPorts,
 	}, nil
-}
-
-func buildBrokerMap(cfg *config.Config) (*BrokerMap, error) {
-	brokerMap := NewBrokerMap()
-
-	for _, v := range cfg.Proxy.BootstrapServers {
-		if lc, ok := brokerMap.GetListenerConfig(v.BrokerAddress); ok {
-			if lc.ListenerAddress != v.ListenerAddress || lc.AdvertisedAddress != v.AdvertisedAddress {
-				return nil, fmt.Errorf("bootstrap server mapping %s configured twice: %v and %v", v.BrokerAddress, v, lc.ToListenerConfig())
-			}
-			continue
-		}
-		logrus.Infof("Bootstrap server %s advertised as %s", v.BrokerAddress, v.AdvertisedAddress)
-		brokerMap.SetListenerConfig(v.BrokerAddress, FromListenerConfig(v))
-	}
-
-	externalToListenerConfig := make(map[string]config.ListenerConfig)
-	for _, v := range cfg.Proxy.ExternalServers {
-		if lc, ok := externalToListenerConfig[v.BrokerAddress]; ok {
-			if lc.ListenerAddress != v.ListenerAddress {
-				return nil, fmt.Errorf("external server mapping %s configured twice: %s and %v", v.BrokerAddress, v.ListenerAddress, lc)
-			}
-			continue
-		}
-		if v.ListenerAddress != v.AdvertisedAddress {
-			return nil, fmt.Errorf("external server mapping has different listener and advertised addresses %v", v)
-		}
-		externalToListenerConfig[v.BrokerAddress] = v
-	}
-
-	for _, v := range externalToListenerConfig {
-		if lc, ok := brokerMap.GetListenerConfig(v.BrokerAddress); ok {
-			if lc.AdvertisedAddress != v.AdvertisedAddress {
-				return nil, fmt.Errorf("bootstrap and external server mappings %s with different advertised addresses: %v and %v", v.BrokerAddress, v.ListenerAddress, lc.AdvertisedAddress)
-			}
-			continue
-		}
-		logrus.Infof("External server %s advertised as %s", v.BrokerAddress, v.AdvertisedAddress)
-		brokerMap.SetListenerConfig(v.BrokerAddress, FromListenerConfig(v))
-	}
-	return brokerMap, nil
 }
 
 func (p *Listeners) GetNetAddressMapping(brokerHost string, brokerPort int32, brokerId int32) (advertisedHost string, advertisedPort int32, err error) {
