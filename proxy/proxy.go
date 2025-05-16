@@ -183,7 +183,6 @@ func (p *Listeners) nextDynamicPort(portOffset uint64, brokerAddress string, bro
 }
 
 func (p *Listeners) ListenDynamicInstance(brokerAddress string, brokerId int32) (string, int32, error) {
-
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	// double check
@@ -226,9 +225,8 @@ func (p *Listeners) ListenDynamicInstance(brokerAddress string, brokerId int32) 
 			p.currentDynamicPortCounter += 1
 		}
 	}
-
 	cfg := NewListenerConfig(brokerAddress, listenerAddress, "", brokerId)
-	l, err := listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc, p)
+	l, err := listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc)
 	if err != nil {
 		return "", 0, err
 	}
@@ -314,7 +312,7 @@ func (p *Listeners) ListenInstances(cfgs []config.ListenerConfig) (<-chan Conn, 
 
 	for _, v := range cfgs {
 		cfg := FromListenerConfig(v)
-		_, err := p.listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc, p)
+		_, err := listenInstance(p.connSrc, cfg, p.tcpConnOptions, p.listenFunc)
 		if err != nil {
 			return nil, err
 		}
