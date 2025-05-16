@@ -82,6 +82,7 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 }
 
 func (p *Listeners) GetNetAddressMapping(brokerHost string, brokerPort int32, brokerId int32) (advertisedHost string, advertisedPort int32, err error) {
+	logrus.Println("GetNetAddressMapping", "brokerHost", brokerHost, "brokerPort", brokerPort, "brokerId", brokerId)
 	if brokerHost == "" || brokerPort <= 0 {
 		return "", 0, fmt.Errorf("broker address '%s:%d' is invalid", brokerHost, brokerPort)
 	}
