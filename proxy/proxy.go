@@ -391,10 +391,10 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg *ListenerConfig, opts TC
 			dst <- Conn{BrokerAddress: brokerAddress, LocalConnection: c}
 		}
 	})
-	if cfg.GetBrokerID() != UnknownBrokerID {
-		logrus.Infof("Listening on %s for remote %s broker %d", l.Addr().String(), cfg.GetBrokerAddress(), cfg.GetBrokerID())
+	if cfg.BrokerID != UnknownBrokerID {
+		logrus.Infof("Listening on %s (%s) for remote %s broker %d", cfg.ListenerAddress, l.Addr().String(), cfg.GetBrokerAddress(), cfg.BrokerID)
 	} else {
-		logrus.Infof("Listening on %s for remote %s", l.Addr().String(), cfg.GetBrokerAddress())
+		logrus.Infof("Listening on %s (%s) for remote %s", cfg.ListenerAddress, l.Addr().String(), cfg.GetBrokerAddress())
 	}
 	return l, nil
 }
