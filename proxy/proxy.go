@@ -322,21 +322,8 @@ func (p *Listeners) ListenInstances(cfgs []config.ListenerConfig) (<-chan Conn, 
 	return p.connSrc, nil
 }
 
-type BrokerConfigMap interface {
-	ToListenerConfig() config.ListenerConfig
-	GetListenerAddress() string
-	GetBrokerAddress() string
-	GetAdvertisedAddress() string
-	GetBrokerID() int32
-}
-
-type HostBasedRouting interface {
-	GetBrokerAddressByAdvertisedHost(host string) (brokerAddress string, brokerId int32, err error)
-}
-
-func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TCPConnOptions, listenFunc ListenFunc, brokers HostBasedRouting) (net.Listener, error) {
-
-	l, err := listenFunc(cfg.GetListenerAddress())
+func (p *Listeners) listenInstance(dst chan<- Conn, cfg *ListenerConfig, opts TCPConnOptions, listenFunc ListenFunc) (net.Listener, error) {
+	l, err := listenFunc(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -344,12 +331,10 @@ func (p *Listeners) listenInstance(dst chan<- Conn, cfg BrokerConfigMap, opts TC
 		for {
 			c, err := l.Accept()
 			if err != nil {
-				logrus.Infof("Error in accept for %q on %v: %v", cfg.ToListenerConfig(), l.Addr(), err)
+				logrus.Infof("Error in accept for %q on %v: %v", cfg.ToListenerConfig(), cfg.ListenerAddress, err)
 				l.Close()
 				return
 			}
-
-			logrus.Infof("%s: Client(%s) Accepted connection", l.Addr().String(), c.RemoteAddr().String())
 
 			var (
 				clientServerName string
