@@ -1,8 +1,8 @@
 module github.com/grepplabs/kafka-proxy
 
-go 1.23.0
+go 1.23
 
-toolchain go1.23.5
+toolchain go1.24.1
 
 require (
 	github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5
