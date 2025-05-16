@@ -126,7 +126,7 @@ func copyThenClose(cfg ProcessorConfig, remote, local DeadlineReadWriteCloser, b
 			if readErr && err == io.EOF {
 				logrus.Infof("Client closed %v", localDesc)
 			} else {
-				copyError(remoteDesc, localDesc, readErr, err)
+				copyError(localDesc, remoteDesc, readErr, err)
 			}
 			remote.Close()
 			local.Close()
@@ -140,7 +140,7 @@ func copyThenClose(cfg ProcessorConfig, remote, local DeadlineReadWriteCloser, b
 		if readErr && err == io.EOF {
 			logrus.Infof("Server %v closed connection", remoteDesc)
 		} else {
-			copyError(remoteAddr.String(), localDesc, readErr, err)
+			copyError(remoteDesc, localDesc, readErr, err)
 		}
 		remote.Close()
 		local.Close()
