@@ -14,7 +14,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type ListenFunc func(listenAddress string) (l net.Listener, err error)
+type ListenFunc func(cfg *ListenerConfig) (l net.Listener, err error)
 
 type Listeners struct {
 	// Source of new connections to Kafka broker.
@@ -27,7 +27,6 @@ type Listeners struct {
 	tcpConnOptions TCPConnOptions
 
 	listenFunc ListenFunc
-	tlsConfig  *tls.Config
 
 	deterministicListeners    bool
 	disableDynamicListeners   bool
@@ -55,12 +54,11 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 		}
 	}
 
-	listenFunc := func(listenAddress string) (ln net.Listener, err error) {
+	listenFunc := func(cfg *ListenerConfig) (ln net.Listener, err error) {
 		if tlsConfig != nil {
-			logrus.Infof("%s: Starting tls listener", listenAddress)
-			return tls.Listen("tcp", listenAddress, tlsConfig)
+			return tls.Listen("tcp", cfg.ListenerAddress, tlsConfig)
 		}
-		return net.Listen("tcp", listenAddress)
+		return net.Listen("tcp", cfg.ListenerAddress)
 	}
 
 	brokerToListenerConfig, err := getBrokerToListenerConfig(cfg)
@@ -73,7 +71,6 @@ func NewListeners(cfg *config.Config) (*Listeners, error) {
 		dynamicAdvertisedListener: cfg.Proxy.DynamicAdvertisedListener,
 		connSrc:                   make(chan Conn, 1),
 		brokerToListenerConfig:    brokerToListenerConfig,
-		tlsConfig:                 tlsConfig,
 		tcpConnOptions:            tcpConnOptions,
 		listenFunc:                listenFunc,
 		deterministicListeners:    cfg.Proxy.DeterministicListeners,
@@ -153,7 +150,6 @@ func (p *Listeners) GetNetAddressMapping(brokerHost string, brokerPort int32, br
 	if err != nil {
 		return "", 0, err
 	}
-	// TODO: what should be the p.defaultListenerIP for the listener?
 	cfg := NewListenerConfig(
 		brokerAddress,
 		net.JoinHostPort(p.defaultListenerIP, fmt.Sprintf("%v", dynamicAdvertisedPort)),
